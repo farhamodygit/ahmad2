@@ -20,7 +20,6 @@ const cloudinaryConfigured = Boolean(
   process.env.CLOUDINARY_API_KEY &&
   process.env.CLOUDINARY_API_SECRET
 );
-let cloudinaryAvailable = cloudinaryConfigured;
 
 if (cloudinaryConfigured) {
   cloudinary.config({
@@ -29,7 +28,7 @@ if (cloudinaryConfigured) {
     api_secret: process.env.CLOUDINARY_API_SECRET,
   });
 } else {
-  console.warn("Cloudinary is not configured. Uploads will be stored locally.");
+  console.error("Cloudinary is not configured. Uploads are disabled. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET.");
 }
 
 const storage = multer.memoryStorage();
@@ -67,6 +66,8 @@ app.use(cors({
   credentials: true,
 }));
 
+// Note: local uploads folder is kept for legacy/testing but uploads are
+// intentionally disabled in production; we enforce Cloudinary-only uploads.
 app.use("/uploads", express.static(uploadsDir));
 
 const readProfile = () => {
@@ -91,44 +92,34 @@ app.post("/api/upload-profile", upload.single("image"), async (req, res) => {
     return res.status(400).json({ error: "No image file provided." });
   }
 
-  const filename = `profile-${Date.now()}${path.extname(req.file.originalname) || ".jpg"}`;
-  const filePath = path.join(uploadsDir, filename);
-
-  try {
-    if (cloudinaryAvailable) {
-      const uploadResult = await new Promise((resolve, reject) => {
-        const stream = cloudinary.uploader.upload_stream(
-          { folder: "portfolio-profile" },
-          (error, result) => {
-            if (error) reject(error);
-            else resolve(result);
-          }
-        );
-
-        stream.end(req.file.buffer);
-      });
-
-      if (uploadResult?.secure_url) {
-        const profile = { imageUrl: uploadResult.secure_url };
-        writeProfile(profile);
-        return res.json(profile);
-      }
-
-      throw new Error("Cloudinary upload returned no secure_url.");
-    }
-  } catch (error) {
-    console.error("Cloudinary upload failed, falling back to local storage:", error);
-    cloudinaryAvailable = false;
+  if (!cloudinaryConfigured) {
+    return res.status(500).json({ error: "Cloudinary is not configured on the server. Uploads are disabled." });
   }
 
   try {
-    fs.writeFileSync(filePath, req.file.buffer);
-    const profile = { imageUrl: `${backendUrl}/uploads/${filename}` };
+    const uploadResult = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        { folder: "portfolio-profile" },
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        }
+      );
+
+      stream.end(req.file.buffer);
+    });
+
+    if (!uploadResult || !uploadResult.secure_url) {
+      console.error('Cloudinary upload returned invalid response:', uploadResult);
+      return res.status(500).json({ error: 'Cloudinary upload failed.' });
+    }
+
+    const profile = { imageUrl: uploadResult.secure_url };
     writeProfile(profile);
     return res.json(profile);
   } catch (error) {
-    console.error("Local upload failed:", error);
-    return res.status(500).json({ error: "Could not upload image." });
+    console.error("Cloudinary upload error:", error);
+    return res.status(500).json({ error: "Could not upload image to Cloudinary.", details: error.message || String(error) });
   }
 });
 
