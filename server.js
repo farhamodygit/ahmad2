@@ -43,9 +43,23 @@ if (!fs.existsSync(uploadsDir)) {
 const backendUrl = process.env.BACKEND_URL || `http://localhost:${port}`;
 
 app.use(express.json());
+
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  "http://localhost:5173",
+  "https://ahmedfrontend.vercel.app",
+].filter(Boolean);
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:5173",
+  origin: (origin, callback) => {
+    // allow requests with no origin (curl, postman)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error(`CORS policy: origin ${origin} not allowed`));
+  },
+  credentials: true,
 }));
+
 app.use("/uploads", express.static(uploadsDir));
 
 const readProfile = () => {
