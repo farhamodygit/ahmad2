@@ -55,6 +55,13 @@ app.use(cors({
     // allow requests with no origin (curl, postman)
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
+    // allow Vercel deployments under *.vercel.app
+    try {
+      const hostname = new URL(origin).hostname;
+      if (hostname && hostname.endsWith('.vercel.app')) return callback(null, true);
+    } catch (e) {
+      // ignore URL parse errors
+    }
     return callback(new Error(`CORS policy: origin ${origin} not allowed`));
   },
   credentials: true,
